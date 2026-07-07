@@ -9,7 +9,7 @@ version: 1.0.0
 
 # 短线侠数据工具包 V1.0.0
 
-**共用参数：** 所有端点均需 `{token}` 标识用户身份（示例值 `a7f8697d99d46933`）。  
+**共用参数：** 所有端点均需 `{token}` 标识用户身份（示例值 `<YOUR_TOKEN>`）。  
 **基域名：** `duanxianxia.cn`（HTML页面），`duanxianxia.com`（JSON复盘API）。  
 **返回格式：** 绝大多数端点为**服务端渲染HTML**，需用HTML解析提取数据；fupan系列为JSON。
 
@@ -242,8 +242,8 @@ import json
 import requests
 from bs4 import BeautifulSoup
 
-TOKEN = "a7f8697d99d46933"
-TOKEN2 = "9ecb55f8ad1a40fd"
+TOKEN = "<YOUR_TOKEN>"
+TOKEN2 = "<YOUR_TOKEN2>"
 
 def fetch_zt_live_json():
     \"\"\"获取实时涨停播报 (JSON API, 无需token, 推荐)\"\"\"
@@ -316,7 +316,7 @@ def fetch_fupan_yidong(date):
 3. 页面数据均为**服务端渲染**，无需执行 JavaScript，requests 即可获取
 4. `{token}` 为用户身份标识，请勿泄露
 5. 数据更新时效：涨停播报/情绪面板为**实时**，竞价异动仅在**竞价时段**(9:15-9:25)有数据
-6. 备用token：`9ecb55f8ad1a40fd`（主token `a7f8697d99d46933` 失效时切换）
+6. 备用token：`<YOUR_TOKEN2>`（主token `<YOUR_TOKEN>` 失效时切换）
 7. `ztlive.json` 无需token但有频率限制，连续请求间隔建议 ≥ 10秒，否则返回 403
 8. 盘中数据请求频率建议 ≤ 1次/秒，避免被限制
 9. 已对接的现有脚本：`fetch_daily_zt.py`（使用 `fupan_date` + `fupan_yidong` API 获取历史涨停数据）
