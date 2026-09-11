@@ -1,15 +1,21 @@
 ---
 name: duanxianxia
-description: 短线侠(duanxianxia.cn)全功能数据工具包 — 覆盖涨停播报、竞价异动、板块强度、资金流向、龙虎榜、连板天梯、情绪指标、个股异动解析、题材库等30+数据端点。支持盘中/盘后数据采集，部分端点含fupan复盘JSON API。适用于打板跟踪、情绪量化、板块轮动、个股挖掘、复盘分析等场景。
+description: 短线侠(duanxianxia.cn)全功能数据工具包 — 覆盖涨停播报、竞价异动、板块强度、资金流向、龙虎榜、连板天梯、情绪指标、个股异动解析、题材库等30+数据端点。支持盘中/盘后数据采集，部分端点含fupan复盘JSON API；内置免 token 免费降级通道（账号过期可用）。适用于打板跟踪、情绪量化、板块轮动、个股挖掘、复盘分析等场景。
 origin: custom
-version: 1.0.0
+version: 1.1.0
 ---
 
 > 站点：https://duanxianxia.cn — 短线侠，专注短线情绪与涨停数据
 
-# 短线侠数据工具包 V1.0.0
+# 短线侠数据工具包 V1.1.0
 
-**共用参数：** 所有端点均需 `{token}` 标识用户身份（示例值 `<YOUR_TOKEN>`）。  
+**共用参数：** 所有端点均需 `{token}` 标识用户身份。本地 token 已存放于 `~/.claude/skills/duanxianxia/.token`（勿提交仓库），使用前读取：
+```python
+import os
+TOKEN = open(os.path.expanduser("~/.claude/skills/duanxianxia/.token")).read().strip()
+```
+下文所有 `{token}` 占位符均替换为 `TOKEN` 的值。  
+**免费降级通道：** 无需 token 的接口清单见第九章（账号过期/额度不足时优先使用）。  
 **基域名：** `duanxianxia.cn`（HTML页面），`duanxianxia.com`（JSON复盘API）。  
 **返回格式：** 绝大多数端点为**服务端渲染HTML**，需用HTML解析提取数据；fupan系列为JSON。
 
@@ -242,8 +248,7 @@ import json
 import requests
 from bs4 import BeautifulSoup
 
-TOKEN = "<YOUR_TOKEN>"
-TOKEN2 = "<YOUR_TOKEN2>"
+TOKEN = open(os.path.expanduser("~/.claude/skills/duanxianxia/.token")).read().strip()
 
 def fetch_zt_live_json():
     \"\"\"获取实时涨停播报 (JSON API, 无需token, 推荐)\"\"\"
@@ -309,14 +314,158 @@ def fetch_fupan_yidong(date):
     return resp.json()
 ```
 
-## 九、注意事项
+## 九、免 Token 免费通道（2026-09 实测可用，账号过期时作为降级）
 
-1. **HTTP 仅限 `duanxianxia.cn` 与 `duanxianxia.com`**，无 HTTPS 降级问题
-2. HTML 端点需配合 `BeautifulSoup` 或正则解析；JSON 端点仅 fupan 相关
-3. 页面数据均为**服务端渲染**，无需执行 JavaScript，requests 即可获取
+以下端点**无需 token**，实测全部 200 可用，账号过期/额度不足时优先走这条链路。
+通用要求：带**完整浏览器 UA**（短 UA 会被 403）；AJAX 型 JSON 接口建议带 `Referer`/`Origin`/`X-Requested-With`（服务端主要校验 Referer）。
+
+### 9.1 板块轮动
+```python
+POST https://duanxianxia.com/api/getPlateRotatData
+form: from=ths|kaipan, days=20, dates=
+Referer: https://duanxianxia.com/web/platerotat/
+→ {"first": "首名板块code", "html": "<tr>...（jQuery innerHTML 片段）"}
+```
+⚠️ 双源语义不同：`ths`（同花顺，88x 代码）= 当日板块涨幅%；`kaipan`（开盘啦，80x/803x）= 强度分。
+**不可跨源比较数值，也不可把 88x 的码传给开盘啦接口（反之亦然）。**
+
+### 9.2 板块龙头（龙一~龙N）
+```python
+POST https://duanxianxia.com/api/getLongByPlate
+form: platecode=<9.1 返回的 code>, days=20, dates=
+→ {"html": "...（HTML 解析）"}
+```
+
+### 9.3 历史涨停池（连板梯队 / 概念分组）
+```python
+GET  https://duanxianxia.com/web/zthis/iframe          # 先访问，取 Cookie + 最新交易日
+POST https://duanxianxia.com/api/getHisZtPool
+form: date=YYYYMMDD, type=lianban|plate                 # lianban=连板梯队, plate=概念分组
+headers: Referer=<iframe URL>, Origin=https://duanxianxia.com,
+         X-Requested-With=XMLHttpRequest, Cookie=<上一步 Cookie>
+→ {"stock_url": "https://qt.gtimg.cn/q=sz002790,...", "html": "..."}
+```
+`stock_url` 可直接请求腾讯批量行情，给池内个股补实时价；无 Cookie 通常也能过（只校验 Referer）。
+
+### 9.4 板块强度 / 主力资金雷达（.cn）
+```python
+POST https://duanxianxia.cn/api/getLiveByStrong
+form: platetype=strong|money, platelist=<88x/80x逗号分隔，可留空>
+Referer: https://duanxianxia.cn/web/qxlive
+→ {"checkplate": [...], "result": "success", "series": [...]}   # strong=强度, money=主力资金
+```
+
+### 9.5 涨停池快照（AES 加密 JSON）
+```python
+GET https://duanxianxia.com/vendor/stockdata/ztpool.json
+# base64(AES-256-CBC-PKCS7)
+# key=b"secretkey322yes!!aaaaaaaaaaaaaaa", iv=b"fixediv_16valued"
+# 解密后: {"list": [[code,name,涨幅,封单额,开板次数,最近封板时间,涨停原因,板型,成交额,流通市值,腿型,连板数,首封时间], ...],
+#          "count": {zt涨停/lb连板/zb炸板/dt跌停 数量, limit_up_count:{today:{num,history_num,rate封板率,open_num,lbnum},yesterday:{...}},
+#                    limit_down_count:{...}}}   ← 情绪指标直接可用
+```
+（key/iv 来自公开仓库 easy-stock；站点若更换需社区重新确认。）
+
+### 9.6 数据源发现
+```python
+GET https://duanxianxia.com/vendor/stockdata/datasource.json
+→ {"istrade":0,"nocache":0,"data_url":"https://ds.duanxianxia.com","base_url":["https://duanxianxia.com"]}
+```
+备用域：`ds.duanxianxia.com`（数据）、`bm.duanxianxia.com`（开盘啦）、`x.duanxianxia.cn`。
+
+### 9.7 开盘啦板块成分 / 子板块（bm 子域）
+```python
+POST https://bm.duanxianxia.com/data/getKaipanStock/web    form: plateCode=<80x/803x>
+→ {"list": [[code, name, ..., 板数, ..., "5天3板"], ...]}
+POST https://bm.duanxianxia.com/data/getKaipanSubPlate      form: plateCode=<80x/803x>
+→ {"result": "<button class='subplate' plateCode='801839'>高速连接</button>..."}
+```
+
+### 9.8 实时板块推送（WebSocket）
+```
+wss://duanxianxia.com/wss1   # onmessage 为 JSON，适合盘中实时刷新
+```
+
+### 9.9 降级映射（token 功能 → 免费替代）
+
+| token 功能 | 免费替代 |
+|---|---|
+| 涨停播报 | `ztlive.json`（实时）/ `ztpool.json`（解密快照） |
+| 连板天梯 | `getHisZtPool(type=lianban)` |
+| 涨停概念分组 | `getHisZtPool(type=plate)` |
+| 板块轮动 | `getPlateRotatData` + `getLongByPlate` |
+| 板块强度 | `getLiveByStrong(platetype=strong)` + `bm.getKaipanStock` |
+| 主力资金流向 | `getLiveByStrong(platetype=money)` |
+| 每日复盘 | `getFupanDate` + `getFupanByYidong` |
+| 市场情绪面板 | `ztpool.json` 的 `count` 字段（涨停/跌停/炸板数、封板率、昨日对比），必要时叠加 fupan |
+| 龙虎榜/个股异动解析/资讯播报/竞价类 | 无免费替代（需续费） |
+
+### 9.10 参考实现
+
+依赖：`pip install requests cryptography`
+
+```python
+import base64, json
+import requests
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+      "(KHTML, like Gecko) Version/17.0 Safari/605.1.15")
+
+
+def ajax_headers(referer, origin="https://duanxianxia.com"):
+    return {"User-Agent": UA,
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Origin": origin, "Referer": referer,
+            "X-Requested-With": "XMLHttpRequest"}
+
+
+def get_plate_rotation(source="ths", days=20):
+    """板块轮动 -> {"first": code, "html": "..."}（ths=涨幅%, kaipan=强度分）"""
+    r = requests.post("https://duanxianxia.com/api/getPlateRotatData",
+                      data={"from": source, "days": days, "dates": ""},
+                      headers=ajax_headers("https://duanxianxia.com/web/platerotat/"),
+                      timeout=15)
+    return r.json()
+
+
+def get_hist_zt_pool(date, pool_type="lianban"):
+    """历史涨停池 -> {"stock_url": 腾讯行情, "html": "..."}（lianban=连板, plate=概念）"""
+    s = requests.Session()
+    s.headers.update({"User-Agent": UA})
+    s.get("https://duanxianxia.com/web/zthis/iframe", timeout=15)  # 拿 Cookie
+    r = s.post("https://duanxianxia.com/api/getHisZtPool",
+               data={"date": date, "type": pool_type},
+               headers={"Referer": "https://duanxianxia.com/web/zthis/iframe",
+                        "Origin": "https://duanxianxia.com",
+                        "X-Requested-With": "XMLHttpRequest"},
+               timeout=20)
+    return r.json()
+
+
+def get_zt_pool_snapshot():
+    """涨停池解密快照 -> {"list": [...], "count": 情绪统计}"""
+    r = requests.get("https://duanxianxia.com/vendor/stockdata/ztpool.json",
+                     headers={"User-Agent": UA}, timeout=15)
+    ct = base64.b64decode(r.text.strip())
+    dec = Cipher(algorithms.AES(b"secretkey322yes!!aaaaaaaaaaaaaaa"),
+                 modes.CBC(b"fixediv_16valued")).decryptor()
+    pt = dec.update(ct) + dec.finalize()
+    pt = pt[:-pt[-1]]                                    # 去 PKCS7 padding
+    return json.loads(pt.decode("utf-8"))
+```
+
+工程建议（社区实践）：429/5xx 指数退避重试（1s/2s/4s）；POST 结果可落盘缓存（板块类 TTL 1h）；
+盘中请求 ≤1次/秒；返回的 `html` 是 innerHTML 片段，用 BeautifulSoup 解析，不要重新逆向。
+
+## 十、注意事项
+
+1. 域名：`duanxianxia.cn`、`duanxianxia.com` 及子域 `ds.`（数据）、`bm.`（开盘啦）、`x.duanxianxia.cn`，均支持 HTTPS
+2. HTML 端点需配合 `BeautifulSoup` 或正则解析；JSON 端点：fupan 系列、getPlateRotatData、getLongByPlate、getHisZtPool、getLiveByStrong、bm 系列、ztpool（AES 加密）等
+3. 页面数据均为**服务端渲染**，无需执行 JavaScript，requests 即可获取（实时推送 `wss://duanxianxia.com/wss1` 除外）
 4. `{token}` 为用户身份标识，请勿泄露
 5. 数据更新时效：涨停播报/情绪面板为**实时**，竞价异动仅在**竞价时段**(9:15-9:25)有数据
-6. 备用token：`<YOUR_TOKEN2>`（主token `<YOUR_TOKEN>` 失效时切换）
+6. token 文件：`~/.claude/skills/duanxianxia/.token`（本地私有，勿提交）；token 失效时需向短线侠更新后覆盖该文件
 7. `ztlive.json` 无需token但有频率限制，连续请求间隔建议 ≥ 10秒，否则返回 403
 8. 盘中数据请求频率建议 ≤ 1次/秒，避免被限制
 9. 已对接的现有脚本：`fetch_daily_zt.py`（使用 `fupan_date` + `fupan_yidong` API 获取历史涨停数据）

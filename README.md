@@ -1,11 +1,13 @@
 # 短线侠数据工具包
 
-[短线侠](https://duanxianxia.cn) 非官方 Python 数据接口，覆盖涨停播报、竞价异动、板块强度、资金流向、龙虎榜、连板天梯、情绪指标、个股异动解析等 30+ 数据端点。
+[短线侠](https://duanxianxia.cn) 非官方 Python 数据接口与 opencode Skill，覆盖涨停播报、竞价异动、板块强度、资金流向、龙虎榜、连板天梯、情绪指标、个股异动解析等 30+ 数据端点；内置**免 token 免费降级通道**（账号过期/未续费时可用）。
+
+> 🔗 **邀请链接（注册/续费入口）**：https://duanxianxia.com/276946
 
 ## 安装
 
 ```bash
-pip install requests beautifulsoup4
+pip install requests beautifulsoup4 cryptography   # cryptography 用于解密涨停池快照
 ```
 
 ## 快速开始
@@ -58,6 +60,40 @@ print(fupan["indicators"])
 | **热点聚焦** | `/web/hotnews/{token}/tdx` | 综合资讯 |
 | **复盘日期** | `POST /api/getFupanDate` | JSON，无需 token |
 | **复盘异动** | `POST /api/getFupanByYidong` | JSON，无需 token |
+
+## 免 Token 免费通道（账号过期时作为降级）
+
+以下端点**无需 token**，2026-09 实测全部可用。完整说明与实现见 `SKILL.md` 第九章。
+
+| 类别 | 端点 | 返回 |
+|------|------|------|
+| **板块轮动** | `POST .com/api/getPlateRotatData` | `{first, html}`（ths=涨幅% / kaipan=强度分） |
+| **板块龙头** | `POST .com/api/getLongByPlate` | `{html}`（龙一~龙N） |
+| **历史涨停池** | `POST .com/api/getHisZtPool` | `{stock_url(腾讯行情), html}`（lianban/plate） |
+| **板块强度/资金** | `POST .cn/api/getLiveByStrong` | `{series}`（strong/money） |
+| **涨停池快照** | `GET .com/vendor/stockdata/ztpool.json` | AES 加密：`{list, count 情绪统计}` |
+| **开盘啦成分股** | `POST bm.duanxianxia.com/data/getKaipanStock/web` | `{list}`（plateCode=80x/803x） |
+| **开盘啦子板块** | `POST bm.duanxianxia.com/data/getKaipanSubPlate` | `{result}` |
+| **实时推送** | `wss://duanxianxia.com/wss1` | WebSocket JSON |
+
+要求：完整浏览器 UA；AJAX 接口带 `Referer`/`Origin`/`X-Requested-With`。
+涨停池快照解密参数（公开常量）：`AES-256-CBC`，key=`secretkey322yes!!aaaaaaaaaaaaaaa`，iv=`fixediv_16valued`。
+
+```python
+import base64, json, requests
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+# 涨停池快照（AES 解密，count 含涨停/连板/炸板/跌停数与封板率）
+raw = requests.get("https://duanxianxia.com/vendor/stockdata/ztpool.json",
+                   headers={"User-Agent": "Mozilla/5.0"}, timeout=15).text
+ct = base64.b64decode(raw.strip())
+dec = Cipher(algorithms.AES(b"secretkey322yes!!aaaaaaaaaaaaaaa"),
+             modes.CBC(b"fixediv_16valued")).decryptor()
+pt = dec.update(ct) + dec.finalize()
+pt = pt[:-pt[-1]]  # 去 PKCS7 padding
+data = json.loads(pt)
+print(data["count"]["limit_up_count"]["today"])  # 涨停数/封板率/连板数
+```
 
 ## Python 示例
 
@@ -147,11 +183,11 @@ for line in lines[:20]:
 
 ## 注意事项
 
-1. HTML 端点需加 `User-Agent` 请求头，否则返回 403
-2. `ztlive.json` 有频率限制，连续请求间隔 ≥ 10 秒
+1. 域名：`duanxianxia.cn`、`duanxianxia.com` 及子域 `ds.`（数据）、`bm.`（开盘啦）、`x.duanxianxia.cn`；HTML 端点需带完整浏览器 UA（短 UA 可能 403）
+2. `ztlive.json` 有频率限制，连续请求间隔 ≥ 10 秒；盘中请求频率建议 ≤ 1 次/秒
 3. 竞价数据仅在 9:15-9:25 时段有效
-4. 盘中请求频率建议 ≤ 1 次/秒
-5. token 请勿泄露到公开仓库
+4. 板块代码不可跨源：同花顺 `88x`=涨幅%，开盘啦 `80x/803x`=强度分，platecode 不可混传
+5. token 请勿泄露到公开仓库（建议用本地文件或环境变量保存）
 
 ## 许可证
 
