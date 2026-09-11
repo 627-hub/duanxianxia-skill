@@ -1,13 +1,13 @@
 ---
 name: duanxianxia
-description: 短线侠(duanxianxia.cn)全功能数据工具包 — 覆盖涨停播报、竞价异动、板块强度、资金流向、龙虎榜、连板天梯、情绪指标、个股异动解析、题材库等30+数据端点。支持盘中/盘后数据采集，部分端点含fupan复盘JSON API；内置免 token 免费降级通道（账号过期可用）。适用于打板跟踪、情绪量化、板块轮动、个股挖掘、复盘分析等场景。
+description: 短线侠(duanxianxia.cn)全功能数据工具包 — 覆盖涨停播报、竞价异动、板块强度、资金流向、龙虎榜、连板天梯、情绪指标、个股异动解析、题材库等30+数据端点。支持盘中/盘后数据采集，部分端点含fupan复盘JSON API；内置免 token 免费降级通道（账号过期可用）与盘后情绪信号（情绪顶点→降仓提醒、冰点→建仓提示、回暖→加仓提示）。适用于打板跟踪、情绪量化、板块轮动、个股挖掘、复盘分析等场景。
 origin: custom
-version: 1.1.0
+version: 1.2.0
 ---
 
 > 站点：https://duanxianxia.cn — 短线侠，专注短线情绪与涨停数据
 
-# 短线侠数据工具包 V1.1.0
+# 短线侠数据工具包 V1.2.0
 
 **共用参数：** 所有端点均需 `{token}` 标识用户身份。本地 token 已存放于 `~/.claude/skills/duanxianxia/.token`（勿提交仓库），使用前读取：
 ```python
@@ -458,7 +458,90 @@ def get_zt_pool_snapshot():
 工程建议（社区实践）：429/5xx 指数退避重试（1s/2s/4s）；POST 结果可落盘缓存（板块类 TTL 1h）；
 盘中请求 ≤1次/秒；返回的 `html` 是 innerHTML 片段，用 BeautifulSoup 解析，不要重新逆向。
 
-## 十、注意事项
+## 十、情绪周期信号（盘后复盘必做）
+
+每个交易日盘后复盘时，**必须**先跑一次情绪信号检测，并把结论写进复盘输出。规则如下（阈值可调，见代码常量 `PEAK/ICE/WARM`）：
+
+| 信号 | 条件 | 动作 |
+|---|---|---|
+| ⚠️ 情绪顶点退潮 | 昨日情绪指标 **> 60**，且今日 涨停家数、封板率、赚钱效应（涨停表现或连板表现）**较昨日均下降** | **降仓** |
+| 🧊 情绪冰点 | 今日情绪指标 **≤ 35** | **开始分批试探建仓** |
+| 🔥 情绪回暖确认 | 今日情绪指标较昨日 **回升 ≥ 5**，且涨停家数回升，且（赚钱效应 或 封板率 回升） | **加仓** |
+
+> 退潮期顶点信号可能连续触发（每天都是有效的降仓提醒）；冰点信号在指标明显回暖前会持续触发。
+> 该信号仅为仓位节奏参考，不构成投资建议。
+
+### 参考实现
+
+```python
+import re
+import requests
+
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+      "(KHTML, like Gecko) Version/17.0 Safari/605.1.15")
+
+
+def _plain(hc):
+    t = re.sub(r"<br\s*/?>", "\n", hc)
+    t = re.sub(r"</(div|tr|td|table|p|button|span)>", "\n", t)
+    t = re.sub(r"<[^>]+>", "", t)
+    return "\n".join(re.sub(r"\s+", " ", l).strip() for l in t.split("\n") if l.strip())
+
+
+def daily_sentiment(date):
+    """date=YYYYMMDD -> {qixi, zt, dt, fbl, ztbx, lbbx}"""
+    r = requests.post("https://duanxianxia.com/api/getFupanByYidong",
+                      data={"date": date, "type": "plate"},
+                      headers={"User-Agent": UA}, timeout=20)
+    t = _plain(r.json().get("htmlcopy", ""))
+    def g(pat):
+        m = re.search(pat, t)
+        return float(m.group(1)) if m else None
+    return {"date": date,
+            "qixi": g(r"情绪指标[:：]\s*(\d+)"),
+            "zt":   g(r"涨停家数[:：]\s*(\d+)"),
+            "dt":   g(r"跌停家数[:：]\s*(\d+)"),
+            "fbl":  g(r"封板率[:：]\s*([\d.]+)%"),
+            "ztbx": g(r"涨停表现[:：]\s*([\-+\d.]+)%"),
+            "lbbx": g(r"连板表现[:：]\s*([\-+\d.]+)%")}
+
+
+def prev_trade_date(date):
+    """上一交易日 YYYYMMDD（免费 API）"""
+    r = requests.post("https://duanxianxia.com/api/getFupanDate",
+                      data={"date": date, "type": "prev"},
+                      headers={"User-Agent": UA}, timeout=15)
+    return (r.json().get("date") or "").replace("-", "")
+
+
+def check_sentiment_signal(date):
+    """盘后情绪信号：顶点→降仓；冰点→分批建仓；回暖→加仓"""
+    PEAK, ICE, WARM = 60, 35, 5
+    t = daily_sentiment(date)
+    y = daily_sentiment(prev_trade_date(date))
+    down = lambda a, b: a is not None and b is not None and a < b
+    up   = lambda a, b: a is not None and b is not None and a > b
+    money_down = down(t["ztbx"], y["ztbx"]) or down(t["lbbx"], y["lbbx"])
+    money_up   = up(t["ztbx"], y["ztbx"])   or up(t["lbbx"], y["lbbx"])
+    sig = []
+    if (y["qixi"] or 0) > PEAK and down(t["zt"], y["zt"]) and down(t["fbl"], y["fbl"]) and money_down:
+        sig.append("⚠️ 情绪顶点退潮 → 降仓")
+    elif (t["qixi"] or 100) <= ICE:
+        sig.append("🧊 情绪冰点 → 分批试探建仓")
+    if up(t["qixi"], y["qixi"]) and (t["qixi"] - (y["qixi"] or 0)) >= WARM \
+            and up(t["zt"], y["zt"]) and (money_up or up(t["fbl"], y["fbl"])):
+        sig.append("🔥 情绪回暖确认 → 加仓")
+    return {"today": t, "yesterday": y, "signals": sig}
+```
+
+输出示例（2026-09-11 实测）：
+
+```
+情绪 33→30 | 涨停 35→40 | 封板率 60.7→69.0 | 溢价 -0.08/-0.45 → 1.03/0.38
+信号: 🧊 情绪冰点 → 分批试探建仓
+```
+
+## 十一、注意事项
 
 1. 域名：`duanxianxia.cn`、`duanxianxia.com` 及子域 `ds.`（数据）、`bm.`（开盘啦）、`x.duanxianxia.cn`，均支持 HTTPS
 2. HTML 端点需配合 `BeautifulSoup` 或正则解析；JSON 端点：fupan 系列、getPlateRotatData、getLongByPlate、getHisZtPool、getLiveByStrong、bm 系列、ztpool（AES 加密）等
