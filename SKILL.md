@@ -1,13 +1,13 @@
 ---
 name: duanxianxia
-description: 短线侠(duanxianxia.cn)全功能数据工具包 — 覆盖涨停播报、竞价异动、板块强度、资金流向、龙虎榜、连板天梯、情绪指标、个股异动解析、题材库等30+数据端点。支持盘中/盘后数据采集，部分端点含fupan复盘JSON API；内置免 token 免费降级通道（账号过期可用）、盘后情绪信号（情绪顶点→降仓提醒、冰点→建仓提示、回暖→加仓提示）与开盘竞价交易计划（9:25-9:30）。适用于打板跟踪、情绪量化、板块轮动、个股挖掘、复盘分析等场景。
+description: 短线侠(duanxianxia.cn)全功能数据工具包 — 覆盖涨停播报、竞价异动、板块强度、资金流向、龙虎榜、连板天梯、情绪指标、个股异动解析、题材库等30+数据端点。支持盘中/盘后数据采集，部分端点含fupan复盘JSON API；内置免 token 免费降级通道（账号过期可用）、盘后情绪信号（顶点→降仓、冰点→建仓、回暖→加仓）、开盘竞价交易计划（9:25-9:30）与3天3板股票池主线提醒。适用于打板跟踪、情绪量化、板块轮动、个股挖掘、复盘分析等场景。
 origin: custom
-version: 1.3.0
+version: 1.4.0
 ---
 
 > 站点：https://duanxianxia.cn — 短线侠，专注短线情绪与涨停数据
 
-# 短线侠数据工具包 V1.3.0
+# 短线侠数据工具包 V1.4.0
 
 **共用参数：** 所有端点均需 `{token}` 标识用户身份。本地 token 已存放于 `~/.claude/skills/duanxianxia/.token`（勿提交仓库），使用前读取：
 ```python
@@ -611,7 +611,33 @@ def auction_metrics(ticks, pre_close):
 用法：9:25-9:30 对关注池（来自昨日涨停/连板梯队）逐票调 `stock_auction` → `auction_metrics`，
 结合 11.3 判定表与第十节情绪周期信号，按 11.4 模板输出计划。
 
-## 十二、注意事项
+## 十二、3天3板股票池与主线持续提醒（每日收盘后）
+
+**规则**
+1. 过去 5 个交易日内出现「X天X板」（X≥3，连续板）的股票 → 加入**股票池**；
+2. 池内股票的涨停概念标签 → 作为**主线关注列表**；
+3. 每个交易日收盘后检查：池内个股 / 主线概念是否**持续有涨停、连板** → 输出「⚠️ 主线持续提醒」（放复盘报告开头）。
+
+**脚本**：`scripts/pool_builder.py`（仅依赖 requests，走免费复盘 API）
+
+```bash
+python3 scripts/pool_builder.py build            # 重建股票池（默认近5个交易日）
+python3 scripts/pool_builder.py show             # 查看股票池与高频概念
+python3 scripts/pool_builder.py check [--date YYYYMMDD]   # 当日主线持续提醒
+```
+
+**状态文件**：`~/.cache/duanxianxia/pool.json`（机器本地，跨 opencode / Hermes 共享）
+
+**判定与输出**
+- 【池内个股续板】：池内股票今日继续涨停（列出几板）；
+- 【主线概念持续】：池内概念今日匹配到 ≥2 只涨停，或出现连板；
+- 无延续输出 `✅ 池内个股与主线概念今日无涨停/连板延续`。
+
+**集成（定时任务）**
+- 盘后复盘：先 `build` 再 `check`，若有提醒放报告最前面；
+- 盘前竞价：先 `show`，取池内最强 5 只及其主线概念纳入竞价关注池。
+
+## 十三、注意事项
 
 1. 域名：`duanxianxia.cn`、`duanxianxia.com` 及子域 `ds.`（数据）、`bm.`（开盘啦）、`x.duanxianxia.cn`，均支持 HTTPS
 2. HTML 端点需配合 `BeautifulSoup` 或正则解析；JSON 端点：fupan 系列、getPlateRotatData、getLongByPlate、getHisZtPool、getLiveByStrong、bm 系列、ztpool（AES 加密）等
