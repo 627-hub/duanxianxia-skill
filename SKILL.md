@@ -1,13 +1,13 @@
 ---
 name: duanxianxia
-description: 短线侠(duanxianxia.cn)全功能数据工具包 — 覆盖涨停播报、竞价异动、板块强度、资金流向、龙虎榜、连板天梯、情绪指标、个股异动解析、题材库等30+数据端点。支持盘中/盘后数据采集，部分端点含fupan复盘JSON API；内置免 token 免费降级通道（账号过期可用）、盘后情绪信号（顶点→降仓、冰点→建仓、回暖→加仓）、开盘竞价交易计划（9:25-9:30）与3天3板股票池主线提醒。适用于打板跟踪、情绪量化、板块轮动、个股挖掘、复盘分析等场景。
+description: 短线侠(duanxianxia.cn)数据底座 + 环节路由 — 覆盖涨停播报、竞价异动、板块强度、资金流向、龙虎榜、连板天梯、情绪指标、个股异动解析、题材库等30+数据端点全表，免 token 免费降级通道（账号过期可用）。工作流已拆为子技能：duanxianxia-pool（股票池/梯队角色）、duanxianxia-health（公告/健康度深查）、duanxianxia-auction（竞价计划）、duanxianxia-review（盘后复盘汇总）、duanxianxia-verify（竞价计划验证）。适用于打板跟踪、情绪量化、板块轮动、个股挖掘、复盘分析等场景的数据查询。
 origin: custom
-version: 1.5.0（原V1.4.0端点 + 2026-09-15增补：只提醒不拉黑/亏钱效应/题材持续性）
+version: 2.0.1（2026-09-16 底座+5环节；增补 9.11 选股通涨停解读免费源）
 ---
 
 > 站点：https://duanxianxia.cn — 短线侠，专注短线情绪与涨停数据
 
-# 短线侠数据工具包 V1.4.0
+# 短线侠数据工具包 V2.0.1（数据底座 + 环节路由）
 
 **共用参数：** 所有端点均需 `{token}` 标识用户身份。本地 token 已存放于 `~/.claude/skills/duanxianxia/.token`（勿提交仓库），使用前读取：
 ```python
@@ -398,7 +398,7 @@ wss://duanxianxia.com/wss1   # onmessage 为 JSON，适合盘中实时刷新
 | 主力资金流向 | `getLiveByStrong(platetype=money)` |
 | 每日复盘 | `getFupanDate` + `getFupanByYidong` |
 | 市场情绪面板 | `ztpool.json` 的 `count` 字段（涨停/跌停/炸板数、封板率、昨日对比），必要时叠加 fupan |
-| 龙虎榜/个股异动解析/资讯播报/竞价类 | 无免费替代（需续费） |
+| 龙虎榜/个股异动解析/资讯播报/竞价类 | 无免费替代（需续费）；个股涨停原因可用 9.11 选股通 `description` 部分替代 |
 
 ### 9.10 参考实现
 
@@ -458,186 +458,86 @@ def get_zt_pool_snapshot():
 工程建议（社区实践）：429/5xx 指数退避重试（1s/2s/4s）；POST 结果可落盘缓存（板块类 TTL 1h）；
 盘中请求 ≤1次/秒；返回的 `html` 是 innerHTML 片段，用 BeautifulSoup 解析，不要重新逆向。
 
-## 十、情绪周期信号（盘后复盘必做）
+### 9.11 选股通/选股宝涨停解读（2026-09-15 实测，免 token，独立厂商）
 
-每个交易日盘后复盘时，**必须**先跑一次情绪信号检测，并把结论写进复盘输出。规则如下（阈值可调，见代码常量 `PEAK/ICE/WARM`）：
-
-| 信号 | 条件 | 动作 |
-|---|---|---|
-| ⚠️ 情绪顶点退潮 | 昨日情绪指标 **> 60**，且今日 涨停家数、封板率、赚钱效应（涨停表现或连板表现）**较昨日均下降** | **降仓** |
-| 🧊 情绪冰点 | 今日情绪指标 **≤ 35** | **开始分批试探建仓** |
-| 🔥 情绪回暖确认 | 今日情绪指标较昨日 **回升 ≥ 5**，且涨停家数回升，且（赚钱效应 或 封板率 回升） | **加仓** |
-
-> 退潮期顶点信号可能连续触发（每天都是有效的降仓提醒）；冰点信号在指标明显回暖前会持续触发。
-> 该信号仅为仓位节奏参考，不构成投资建议。
-
-### 参考实现
+站点 `xuangutong.com.cn/top-gainer`（选股通，选股宝系）的前端接口，**无需 token、独立于短线侠/东财/腾讯**——短线侠整站 403 风控或 token 过期时的降级源。
 
 ```python
-import re
+import datetime, zoneinfo
 import requests
 
-UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
-      "(KHTML, like Gecko) Version/17.0 Safari/605.1.15")
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+H = {"User-Agent": UA, "Referer": "https://xuangutong.com.cn/"}
+BASE = "https://flash-api.xuangubao.cn"        # 备用域 flash-api.xuangubao.com.cn 同接口
 
 
-def _plain(hc):
-    t = re.sub(r"<br\s*/?>", "\n", hc)
-    t = re.sub(r"</(div|tr|td|table|p|button|span)>", "\n", t)
-    t = re.sub(r"<[^>]+>", "", t)
-    return "\n".join(re.sub(r"\s+", " ", l).strip() for l in t.split("\n") if l.strip())
+def xgt_plates(yyyymmdd):
+    """热点板块 + 催化描述（date 传当日 0 点 CST 的 unix 秒）"""
+    d = datetime.datetime.strptime(yyyymmdd, "%Y%m%d").replace(tzinfo=zoneinfo.ZoneInfo("Asia/Shanghai"))
+    r = requests.get(f"{BASE}/api/surge_stock/plates",
+                     params={"date": int(d.timestamp())}, headers=H, timeout=15)
+    return r.json()["data"]["items"]        # [{id, name, description}] 例: PCB板/固态电池/国产芯片…+催化
 
 
-def daily_sentiment(date):
-    """date=YYYYMMDD -> {qixi, zt, dt, fbl, ztbx, lbbx}"""
-    r = requests.post("https://duanxianxia.com/api/getFupanByYidong",
-                      data={"date": date, "type": "plate"},
-                      headers={"User-Agent": UA}, timeout=20)
-    t = _plain(r.json().get("htmlcopy", ""))
-    def g(pat):
-        m = re.search(pat, t)
-        return float(m.group(1)) if m else None
-    return {"date": date,
-            "qixi": g(r"情绪指标[:：]\s*(\d+)"),
-            "zt":   g(r"涨停家数[:：]\s*(\d+)"),
-            "dt":   g(r"跌停家数[:：]\s*(\d+)"),
-            "fbl":  g(r"封板率[:：]\s*([\d.]+)%"),
-            "ztbx": g(r"涨停表现[:：]\s*([\-+\d.]+)%"),
-            "lbbx": g(r"连板表现[:：]\s*([\-+\d.]+)%")}
-
-
-def prev_trade_date(date):
-    """上一交易日 YYYYMMDD（免费 API）"""
-    r = requests.post("https://duanxianxia.com/api/getFupanDate",
-                      data={"date": date, "type": "prev"},
-                      headers={"User-Agent": UA}, timeout=15)
-    return (r.json().get("date") or "").replace("-", "")
-
-
-def check_sentiment_signal(date):
-    """盘后情绪信号：顶点→降仓；冰点→分批建仓；回暖→加仓"""
-    PEAK, ICE, WARM = 60, 35, 5
-    t = daily_sentiment(date)
-    y = daily_sentiment(prev_trade_date(date))
-    down = lambda a, b: a is not None and b is not None and a < b
-    up   = lambda a, b: a is not None and b is not None and a > b
-    money_down = down(t["ztbx"], y["ztbx"]) or down(t["lbbx"], y["lbbx"])
-    money_up   = up(t["ztbx"], y["ztbx"])   or up(t["lbbx"], y["lbbx"])
-    sig = []
-    if (y["qixi"] or 0) > PEAK and down(t["zt"], y["zt"]) and down(t["fbl"], y["fbl"]) and money_down:
-        sig.append("⚠️ 情绪顶点退潮 → 降仓")
-    elif (t["qixi"] or 100) <= ICE:
-        sig.append("🧊 情绪冰点 → 分批试探建仓")
-    if up(t["qixi"], y["qixi"]) and (t["qixi"] - (y["qixi"] or 0)) >= WARM \
-            and up(t["zt"], y["zt"]) and (money_up or up(t["fbl"], y["fbl"])):
-        sig.append("🔥 情绪回暖确认 → 加仓")
-    return {"today": t, "yesterday": y, "signals": sig}
+def xgt_limit_up(yyyymmdd):
+    """涨停股 + 涨停原因原文 + 几天几板 + 概念标签 + 关联研报"""
+    r = requests.get(f"{BASE}/api/surge_stock/stocks",
+                     params={"date": yyyymmdd, "normal": "true", "uplimit": "true"},
+                     headers=H, timeout=15)
+    d = r.json()["data"]
+    fields = d["fields"]
+    return [dict(zip(fields, row)) for row in d["items"]]
 ```
 
-输出示例（2026-09-11 实测）：
+返回字段（`data.fields` 与 `items` 按列对齐解包；2026-09-15 实测）：
+
+| 字段 | 含义 |
+|---|---|
+| `code` / `prod_name` | 代码（带 .SS/.SZ）/ 名称 |
+| `cur_price` / `px_change_rate` | 现价 / 涨幅（小数，0.0999=10%） |
+| `description` | **涨停原因解读原文**（基本面/消息面驱动逻辑） |
+| `plates` | 所属概念 `[{id, name}]`，如 股权转让/固态电池 |
+| `m_days_n_boards` | **几天几板**（如 "2天2板"/"5天5板"，非连板也标） |
+| `enter_time` | 涨停/进入时刻（unix 秒） |
+| `up_limit` | 是否封住涨停 |
+| `turnover_ratio` / `circulation_value` | 换手（小数）/ 流通市值 |
+| `report_title` / `report_url` | 关联研报标题/链接（可空） |
+
+用途与局限：
+- 用途：复盘题材表的「催化/驱动」列（`plates`）、涨停原因原文（`description`）、几天几板交叉校验（pool/roles 缺失时兜底）、个股概念标签（竞价同概念分组）；
+- 局限：仅涨停股快照（无封板率/炸板全貌）、板块描述为聚合口径非官方；实时性弱于 `ztlive.json`；
+- 请求需浏览器 UA + `Referer: https://xuangutong.com.cn/`；建议间隔 ≥1 秒、勿并发。
+
+## 十、环节路由与数据流（2026-09-16 拆分为子技能）
+
+本目录 = **数据底座（以上端点全表）+ 环节路由**。工作流程已拆为 `references/*/SKILL.md` 子技能，按需单独加载，避免一次载入全部流程：
+
+| 环节 | 子技能 | 运行时机 | 读 | 写 |
+|---|---|---|---|---|
+| 池维护 | `duanxianxia-pool` | 18:50 第一步 | fupan | pool.json: stocks/roles/roles_date |
+| 深查/公告 | `duanxianxia-health` | 18:50 第二步；8:30 盘前 | pool.json | pool.json: warnings + health_YYYY-MM-DD.json |
+| 竞价验证 | `duanxianxia-verify` | 19:10 第一步 | 9:27 计划md + 行情 | verify_YYYY-MM-DD.json |
+| 复盘汇总 | `duanxianxia-review` | 19:10 第二步 | fupan + pool.json + 验证 | 复盘JSON + 推送摘要 |
+| 竞价计划 | `duanxianxia-auction` | 9:27 | pool.json: roles/warnings | 计划md |
+
+每日数据流：
 
 ```
-情绪 33→30 | 涨停 35→40 | 封板率 60.7→69.0 | 溢价 -0.08/-0.45 → 1.03/0.38
-信号: 🧊 情绪冰点 → 分批试探建仓
+18:50 pool→health（重活错峰先跑）
+  → 19:10 verify→review（一条汇总推送）
+  → 次日 8:30 health 盘前增量（隔夜公告）
+  → 9:27 auction 出计划（读 roles + warnings）
 ```
 
-## 十一、开盘竞价交易计划（9:25-9:30 必做）
+中间产物约定（跨 opencode / Hermes）：
+- `~/.cache/duanxianxia/pool.json`：stocks / roles / roles_date / warnings（只提醒不拉黑）
+- `~/.cache/duanxianxia/health_YYYY-MM-DD.json`：深查明细（复盘 JSON 的梯队健康度来源）
+- `~/.cache/duanxianxia/verify_YYYY-MM-DD.json`：竞价计划验证明细
+- `~/.hermes/cron/output/2aa245c15624/复盘_YYYY-MM-DD.json`：完整复盘 JSON
+- `~/.hermes/cron/output/e1652881ece0/<日期>_*.md`：竞价计划原文
 
-9:25 竞价撮合完成后、9:30 开盘前有 5 分钟决策窗口，按本节流程输出当日交易计划。
-（本节指标同时覆盖 **开盘竞价 9:15-9:25** 与 **尾盘竞价 14:57-15:00**。）
-
-### 11.1 数据源
-
-| 层级 | 工具 | 说明 |
-|---|---|---|
-| 市场级 | TDX 官方 MCP `tdx_screener("竞价高开")` / `("竞价抢筹")` | 全市场竞价名单；抢筹版带 `开盘抢筹(%)` 与自由流通股本（实测 2026-09-11：高开 586 家、抢筹榜 1520 条） |
-| 市场级 | 短线侠 `mob/jjyd/{token}`（**需续费**） | 7 个 tab：涨停委买/昨日涨停/竞价爆量/竞价抢筹/竞价净额/昨炸板/昨断板/昨上榜；字段：竞价换手、竞涨、主力净买、竞额、竞价量比 |
-| 个股级 | TDX 免费 MCP `stock_auction(market, code)` | 09:15-09:25 每 3 秒 `{time, price, matched, unmatched}` + 尾盘竞价；部分个股可能无数据，重试即可 |
-| 个股级 | TDX 官方 MCP `tdx_quotes`（9:25 后） | 开盘价、竞价量、盘口、昨收 |
-
-### 11.2 指标含义
-
-- **竞价高开幅度** = 9:25 竞价价 / 昨收 − 1
-- **matched（匹配量/手）**：已撮合量，衡量竞价人气
-- **unmatched（未匹配量/手）**：**>0 = 买方剩余（抢筹）；<0 = 卖方剩余（抛压）**
-- **尾段方向**：9:24 → 9:25 价格斜率（上翘=抢筹 / 下拐=跳水）
-- **撤单观察**：9:15-9:20 可撤单（虚挂多），9:20-9:25 不可撤（意愿真实）
-- **一字抢筹**：竞价即涨停 + 未匹配买量巨大
-
-### 11.3 形态判定表
-
-| 形态 | 条件 | 动作 |
-|---|---|---|
-| 一字抢筹 | 高开≈板幅 且 未匹配买量极大 | 情绪冰点只排不追；回暖可排板 |
-| 强势高开 | 高开 +3~7% 且 匹配量放大 且 未匹配>0 | 半路/打板候选 |
-| 弱转强 | 昨日炸板/断板 + 高开 +1~5% 且 未匹配>0 | 低吸/打板（重点） |
-| 高开回落 | 9:15 涨停 → 9:25 大幅回落 且 未匹配转负 | 等分时承接，回封再打 |
-| 核按钮 | 低开 ≤−5% 且 放量卖压 | 不接飞刀 |
-| 缩量平开 | 平/低开 且 匹配量小 | 观望 |
-
-### 11.4 计划模板（9:29 前出）
-
-```
-【今日交易计划 · YYYY-MM-DD】
-1. 情绪定位：<降仓/建仓/加仓>（第十节信号）
-2. 竞价温度：高开X家、抢筹榜方向；昨日连板梯队竞价强弱
-3. 关注标的：
-   | 代码 | 名称 | 昨日状态 | 竞价高开% | 匹配量 | 未匹配 | 形态 | 操作条件 | 仓位 |
-4. 持仓处理：止盈/止损/持有
-5. 仓位纪律：单票上限、总仓位、不接飞刀、不打缩量板
-```
-
-### 11.5 计算函数
-
-```python
-def auction_metrics(ticks, pre_close):
-    """ticks: stock_auction 原始返回；取 09:15-09:25 段计算指标"""
-    au = [t for t in ticks if "09:15" <= t["time"] <= "09:25"]
-    if not au:
-        return None
-    last = au[-1]
-    px = last["price"]
-    late = next((t for t in reversed(au) if t["time"] <= "09:24:30"), au[0])
-    return {
-        "竞价价格": px,
-        "高开幅度%": round((px / pre_close - 1) * 100, 2),
-        "匹配量(手)": last["matched"],
-        "未匹配量(手)": last["unmatched"],
-        "未匹配方向": "买盘剩余(强)" if last["unmatched"] > 0 else "卖盘剩余(弱)",
-        "尾段方向": "抢筹" if px > late["price"] else ("跳水" if px < late["price"] else "走平"),
-    }
-```
-
-用法：9:25-9:30 对关注池（来自昨日涨停/连板梯队）逐票调 `stock_auction` → `auction_metrics`，
-结合 11.3 判定表与第十节情绪周期信号，按 11.4 模板输出计划。
-
-## 十二、3天3板股票池与主线持续提醒（每日收盘后）
-
-**规则**
-1. 过去 5 个交易日内出现「X天X板」（X≥3，连续板）的股票 → 加入**股票池**；
-2. 池内股票的涨停概念标签 → 作为**主线关注列表**；
-3. 每个交易日收盘后检查：池内个股 / 主线概念是否**持续有涨停、连板** → 输出「⚠️ 主线持续提醒」（放复盘报告开头）。
-
-**脚本**：`scripts/pool_builder.py`（仅依赖 requests，走免费复盘 API）
-
-```bash
-python3 scripts/pool_builder.py build            # 重建股票池（默认近5个交易日）
-python3 scripts/pool_builder.py show             # 查看股票池与高频概念
-python3 scripts/pool_builder.py check [--date YYYYMMDD]   # 当日主线持续提醒
-```
-
-**状态文件**：`~/.cache/duanxianxia/pool.json`（机器本地，跨 opencode / Hermes 共享）
-
-**判定与输出**
-- 【池内个股续板】：池内股票今日继续涨停（列出几板）；
-- 【主线概念持续】：池内概念今日匹配到 ≥2 只涨停，或出现连板；
-- 无延续输出 `✅ 池内个股与主线概念今日无涨停/连板延续`。
-
-**集成（定时任务）**
-- 盘后复盘：先 `build` 再 `check`，若有提醒放报告最前面；
-- 盘前竞价：先 `show`，取池内最强 5 只及其主线概念纳入竞价关注池。
-
-## 十三、注意事项
+## 十一、注意事项（原十三）
 
 1. 域名：`duanxianxia.cn`、`duanxianxia.com` 及子域 `ds.`（数据）、`bm.`（开盘啦）、`x.duanxianxia.cn`，均支持 HTTPS
 2. HTML 端点需配合 `BeautifulSoup` 或正则解析；JSON 端点：fupan 系列、getPlateRotatData、getLongByPlate、getHisZtPool、getLiveByStrong、bm 系列、ztpool（AES 加密）等
@@ -647,57 +547,7 @@ python3 scripts/pool_builder.py check [--date YYYYMMDD]   # 当日主线持续�
 6. token 文件：`~/.claude/skills/duanxianxia/.token`（本地私有，勿提交）；token 失效时需向短线侠更新后覆盖该文件
 7. `ztlive.json` 无需token但有频率限制，连续请求间隔建议 ≥ 10秒，否则返回 403
 8. 盘中数据请求频率建议 ≤ 1次/秒，避免被限制
-9. 已对接的现有脚本：`fetch_daily_zt.py`（使用 `fupan_date` + `fupan_yidong` API 获取历史涨停数据）
-
-
----
-
-## 十二、梯队健康度与题材持续性（2026-09-14/15 新增）
-
-### 12.1 同概念/板块内比选（关注池 >10 只时必做）
-- **组内排序**：连板 > 断板 > 连续分歧；连板=主线资金共识，断板=博弈修复弹性，连续分歧=资金涣散只观察。
-- **唯一连板+昨日放量 → 双向预案**：热点回流（竞价承接强/未匹配>0/温和高开）= 概念内首选可半路打板；分歧（竞价跳水/未匹配转负/低开）→ 观察断板弱转强卡位。
-- **温度计逻辑**：所有概念横向比较，优先看「唯一连板+放量」票的竞价走势——它强概念可做，它弱概念降级。
-
-### 12.2 梯队健康度检查（盘后必做，同概念≥2只的梯队概念）
-触发后对概念的连板票批量三项检查：
-1. **异常波动公告三级判定**（巨潮 hisAnnouncement + pdftotext，抓"特别提示"段）：
-   - 🔴**强负面**（公司直接打击炒作情绪）：「击鼓传花」字样 / 「炒作情绪过热」「非理性炒作」「勿受市场情绪过热影响」/ 一月内第3次及以上异动+涨幅换手异常披露——公告原文**必须引用**进报告；这类公告次日通常低开。
-   - 🟠**弱负面**：滚动PE亏损 / 业绩亏损 / 扣非<−50% / **PE/PB远高于行业（估值偏离类只算弱负面——未直接打击炒作情绪，公告次日走势不确定，竞价照常判定）** / "基本面无变化" / "理性决策"复述≥2次。
-   - 🟡中性：常规披露。关注函/问询函→至少弱负面，叠加情绪定性则强负面。
-2. **龙虎榜席位**（东财 datacenter，请求间隔≥3秒）：买方东财席位≥2家且占比>30%=散户接盘；净买连续负而连板=对倒嫌疑。
-3. **资金流出**：龙虎榜净买趋势+个股资金流——连板但主力持续净流出=借情绪出货。
-- **⚠️ 只提醒不拉黑（用户定稿 2026-09-15）**：结论写 `pool.json` 的 `warnings` 字段（{code或概念: {level"🔴"/"🟠", reason, date, quote}}），**票永不剔除**——次日盘前读 warnings 只在关注池表格旁加 🔴/🟠 标记+一句风险摘要，参与与仓位由用户自决，不做任何禁止性处理。
-- 限流：东财≥3秒、巨潮≥1秒、PDF每票1份、单概念≤90秒。
-
-### 12.2 只提醒不拉黑·补充
-- 连续一字加速票不接加速：高开不参与、一字只排不追、分歧充分（竞价放量未匹配转负再转正、或开盘充分换手）才低吸试仓且仓位减半≤8%，破前日涨停价止损；冰点期连续一字票一律只观察。
-
-### 12.3 亏钱效应与板块分歧检验（盘后必做，与涨停情绪并重）
-- **亏钱效应数据**：跌停家数、大面票（≤-8%）名单与概念分布、**昨日涨停今日跌停数**（最强亏钱信号）、昨日涨停今日-5%以上（炸板分歧回落）。跌停池 getTopicDTPool 常返回空→用东财 push2 clist 按涨幅升序取前30兜底+腾讯批量行情。
-- **板块分歧规则（用户定稿 2026-09-15）**：概念**龙头反包涨停但小弟跌停/大面** → ⚠️「板块分歧」**龙头不会有持续性**（龙头独走=资金卡位抱团、板块无合力，次日龙头大概率补跌开板）；反向**昨日反包龙头今日跌停+集体大面=分歧兑现、龙头周期终结**（实证：桂林旅游 9/14 旅游反包→9/15跌停，天目湖/云南旅游同日-10%）。命中写 warnings（🟠）。
-
-### 12.4 题材持续性监控（盘后必做）
-- **题材主键 = fupan htmlcopy 的概念标签**（双星新材=MLCC离型膜、中新赛克=数据安全/AI安全），行业字段（hybk/board）**辅助对照**——板块与概念双维度都要考察（用户定稿 2026-09-15）。
-- **宽度加宽↑**：题材今日涨停数≥昨日，或出现二板及以上晋级（首板集体晋级/梯队形成）；连续晋级+新首板=强持续（实例：电力链闽东1→2→3→4→5板+新首板补给；元件/PCB链澳弘1→2→3接棒超声、IT服务启明+博汇双首板齐晋2板）。
-- **负反馈↓/断线**：题材昨日涨停标的今日跌停/大面（≤-9.5%最强负反馈）/炸板回落（≤-5%）→「负反馈堪忧」；昨日有今全无=断线（实例：旅游/零售/种业 9/15 全军覆没）。
-- **报告结构**（复盘第②节）：题材 | 今日涨停数(vs昨日) | 梯队(最高板/二板数/首板数) | 宽度方向(↑/→/↓) | 负反馈(跌停/炸板票) | 持续性结论(强持续/弱持续/负反馈堪忧/断线)。
-
-### 12.5 pool_builder.py 与 cron
-- `scripts/pool_builder.py`（仅 requests，_throttle ≥10秒防整站403）：`build`(近5日池,含X天Y板非连续) / `show` / `check` / `roles`(梯队角色=连板/断板/分歧/观察+昨日量能，写 pool.json 供次日盘前读)。
-- cron三任务（8:30公告扫描 8881dfe92fd2 / 9:27竞价 e1652881ece0 / 18:50复盘 2aa245c15624，推QQ）：复盘产 JSON 报告落盘 + 推送仅结论摘要。
-- ⚠️ roles 展示分组曾出现「6只连板」对不上——写报告前必须逐票核 roles 数据。
-
-### 12.6 竞价计划复盘验证（盘后必做，2026-09-16 新增）
-- **目的**：对**当日早上 9:27 竞价计划**（`~/.hermes/cron/output/e1652881ece0/当日_*.md`）逐票验证判断对错，把"计划 vs 实际"的偏差写成教训反馈，持续校准竞价判定规则。
-- **验证方法**：读当日计划的关注标的表（每票有 竞价高开%/形态/操作），再用腾讯批量行情/日K 取实际走势对照：
-  - **反包失败/承接失败**：计划判"承接极强，可跟进"但开盘后无力承接回落、或判"弱转强候选低吸"但实际走跌（实例：百大集团 9/14 计划表外判断"主线延续"，实际 9/14 跌停开仅拉 4% 后 9/15 直接跌停；瑞尔特 9/15 计划首选弱转强低吸，实际当日 -10%）→ 记「计划偏差」。
-  - **一字加速票验证**：计划判"不参与/只排不追"的票，实际开板/封死情况。
-  - **数据缺失票**：计划中"竞价数据缺失"的票，补算当日实际开盘/竞价表现，评估"若当时有数据是否应参战"。
-- **输出（进复盘JSON的"竞价计划验证"字段 + 推送摘要一行）**：计划票名 | 计划判断 | 实际走势 | 偏差（遗漏参战标的/误判形态）。连续 2 日同类偏差 → 把修正规则写入 11.3 形态判定表（skill 自迭代）。
-
-### 12.7 复盘报告结构（复盘第①~④节+JSON字段）
-推送摘要段落：①情绪数据表（涨停+亏钱效应并列）②主线与梯队（题材持续性表+梯队角色表+分歧⚠️标注）③梯队健康度（逐概念公告级/原文关键句/龙虎榜/资金）④竞价计划验证（计划vs实际，偏差票点名）⑤情绪信号与明日关注（概念温度计；⚠️分歧+负反馈题材明示）。
-JSON字段在推送段落基础上更详尽（全量明细），新增 `"竞价计划验证"` 字段：[{票, 计划判断, 实际走势, 偏差类型, 教训}]。
+9. 已对接的现有脚本：`fetch_daily_zt.py`（使用 `fupan_date` + `fupan_yidong` API 获取历史涨停数据）、`scripts/pool_builder.py`（股票池/梯队角色，见 `references/pool/`）
+10. IP 风控：密集调用 → 整站 403 数小时；脚本 `_throttle()` ≥10 秒，人工调用同样遵守各环节 skill 里的限流要求
 
 **免费降级渠道（第九章）**：ztlive.json 免token；getHisZtPool 需先 GET `/web/zthis/iframe` 建 session；本地 opentdx MCP（stock_top_board 涨停池/stock_auction 竞价/symbol_zjlx 资金流）可替代行情类；龙虎榜席位与公告全文用东财 datacenter/巨潮（免费、不受短线侠风控）。

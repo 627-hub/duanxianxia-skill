@@ -1,6 +1,8 @@
 # 短线侠数据工具包
 
-[短线侠](https://duanxianxia.cn) 非官方 Python 数据接口与 opencode Skill，覆盖涨停播报、竞价异动、板块强度、资金流向、龙虎榜、连板天梯、情绪指标、个股异动解析等 30+ 数据端点；内置**免 token 免费降级通道**（账号过期/未续费时可用）、**盘后情绪信号**（情绪顶点→降仓提醒，冰点→建仓提示，回暖→加仓提示）、**开盘竞价交易计划**（9:25-9:30 五分钟出计划）与 **3天3板股票池主线持续提醒**。
+[短线侠](https://duanxianxia.cn) 非官方 Python 数据接口与 opencode/Hermes Skill，覆盖涨停播报、竞价异动、板块强度、资金流向、龙虎榜、连板天梯、情绪指标、个股异动解析等 30+ 数据端点；内置**免 token 免费降级通道**（账号过期/未续费时可用）、**盘后情绪信号**（情绪顶点→降仓提醒，冰点→建仓提示，回暖→加仓提示）、**开盘竞价交易计划**（9:25-9:30 五分钟出计划）与 **3天3板股票池主线持续提醒**。
+
+2026-09-16 拆分为 **1 底座 + 5 环节** 子技能（避免一次执行/加载全部流程，见下文「技能结构」）。
 
 > 🔗 **邀请链接（注册/续费入口）**：https://duanxianxia.com/276946
 
@@ -31,9 +33,24 @@ fupan = dx.fupan_by_yidong("20260707")
 print(fupan["indicators"])
 ```
 
+## 技能结构（2026-09-16 拆分）
+
+| Skill | 环节 | 运行时机 |
+|---|---|---|
+| `duanxianxia` | 数据底座（30+ 端点全表 / 免费通道 / 注意事项）+ 路由 | 交互查询 |
+| `duanxianxia-pool` | 股票池维护 / 梯队角色（连板/断板/分歧/观察） | 18:50 深查第一步 |
+| `duanxianxia-health` | 公告 / 梯队健康度深查（只提醒不拉黑） | 18:50 深查；次日 8:30 盘前增量 |
+| `duanxianxia-auction` | 开盘竞价交易计划（9:25-9:30） | 9:27 |
+| `duanxianxia-review` | 复盘汇总与推送（情绪信号/题材持续性/报告） | 19:10 |
+| `duanxianxia-verify` | 竞价计划复盘验证（计划 vs 实际） | 19:10 |
+
+每日数据流：`18:50 pool→health（重活错峰先跑）→ 19:10 verify→review（一条汇总推送）→ 次日 8:30 health 盘前增量 → 9:27 auction 出计划`。
+
+中间产物（跨 opencode / Hermes 共享）：`~/.cache/duanxianxia/pool.json`（stocks/roles/roles_date/warnings）、`health_YYYY-MM-DD.json`、`verify_YYYY-MM-DD.json`、`复盘_YYYY-MM-DD.json`。
+
 ## opencode Skill 使用
 
-将此目录作为 opencode skill 加载，对话中直接询问：
+将此目录作为 skill 加载，对话中直接询问（底座含全部端点；环节流程自动路由到子技能）：
 
 - "今天涨停的股票有哪些？"
 - "市场情绪怎么样？"
@@ -42,6 +59,8 @@ print(fupan["indicators"])
 - "获取 20260707 的复盘数据"
 - "盘后复盘：现在该降仓还是建仓？"
 - "今日竞价怎么样？帮我出交易计划"
+- "股票池里哪些还在续板？梯队角色看一下"
+- "帮我扫一遍池内票的隔夜公告风险"
 
 ## 数据端点
 
@@ -77,6 +96,7 @@ print(fupan["indicators"])
 | **开盘啦成分股** | `POST bm.duanxianxia.com/data/getKaipanStock/web` | `{list}`（plateCode=80x/803x） |
 | **开盘啦子板块** | `POST bm.duanxianxia.com/data/getKaipanSubPlate` | `{result}` |
 | **实时推送** | `wss://duanxianxia.com/wss1` | WebSocket JSON |
+| **选股通涨停解读** | `GET flash-api.xuangubao.cn/api/surge_stock/{plates,stocks}` | `{plates: 板块+催化}`、`{stocks: 涨停原因/几天几板/概念}`（免token，独立厂商） |
 
 要求：完整浏览器 UA；AJAX 接口带 `Referer`/`Origin`/`X-Requested-With`。
 涨停池快照解密参数（公开常量）：`AES-256-CBC`，key=`secretkey322yes!!aaaaaaaaaaaaaaa`，iv=`fixediv_16valued`。
