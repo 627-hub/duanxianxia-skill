@@ -2,12 +2,12 @@
 name: duanxianxia
 description: 短线侠(duanxianxia.cn)数据底座 + 环节路由 — 覆盖涨停播报、竞价异动、板块强度、资金流向、龙虎榜、连板天梯、情绪指标、个股异动解析、题材库等30+数据端点全表，免 token 免费降级通道（账号过期可用）。工作流已拆为子技能：duanxianxia-pool（股票池/梯队角色）、duanxianxia-health（公告/健康度深查）、duanxianxia-auction（竞价计划）、duanxianxia-review（盘后复盘汇总）、duanxianxia-verify（竞价计划验证）。适用于打板跟踪、情绪量化、板块轮动、个股挖掘、复盘分析等场景的数据查询。
 origin: custom
-version: 2.0.1（2026-09-16 底座+5环节；增补 9.11 选股通涨停解读免费源）
+version: 2.0.2（2026-09-16 底座+5环节；增补 9.11 选股通涨停解读 + 9.12 新浪个股资金流免费源）
 ---
 
 > 站点：https://duanxianxia.cn — 短线侠，专注短线情绪与涨停数据
 
-# 短线侠数据工具包 V2.0.1（数据底座 + 环节路由）
+# 短线侠数据工具包 V2.0.2（数据底座 + 环节路由）
 
 **共用参数：** 所有端点均需 `{token}` 标识用户身份。本地 token 已存放于 `~/.claude/skills/duanxianxia/.token`（勿提交仓库），使用前读取：
 ```python
@@ -509,6 +509,19 @@ def xgt_limit_up(yyyymmdd):
 - 局限：仅涨停股快照（无封板率/炸板全貌）、板块描述为聚合口径非官方；实时性弱于 `ztlive.json`；
 - 请求需浏览器 UA + `Referer: https://xuangutong.com.cn/`；建议间隔 ≥1 秒、勿并发。
 
+### 9.12 新浪个股资金流趋势（2026-09-16 实测，免 token）
+
+```python
+GET https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssl_qsfx_zjlrqs?daima=sz000993
+# 需带浏览器 UA；返回 JSON 数组（最新在前，全历史）：
+# [{opendate(日期), trade(收盘), changeratio(涨跌幅), turnover(成交量),
+#   netamount(净流入额,元), ratioamount(净流入占比),
+#   r0_net(特大单净额,元), r0_ratio(特大单净占比), r0x_ratio, ...}, ...]
+```
+
+用途：个股「主力持续净流出」判断（连续多日 `r0_net`/`netamount` 为负 = 持续净流出）、资金趋势复盘；`daima` 格式 `sz000993` / `sh600519`；实测 1 秒间隔可连续调用。
+说明：这是东财 push2his 被限流（RemoteDisconnected）、腾讯 `ff_`/ifzq `ffqs` 已下线之后的替代主源（用于 `duanxianxia-health` 深查）。
+
 ## 十、环节路由与数据流（2026-09-16 拆分为子技能）
 
 本目录 = **数据底座（以上端点全表）+ 环节路由**。工作流程已拆为 `references/*/SKILL.md` 子技能，按需单独加载，避免一次载入全部流程：
@@ -547,7 +560,7 @@ def xgt_limit_up(yyyymmdd):
 6. token 文件：`~/.claude/skills/duanxianxia/.token`（本地私有，勿提交）；token 失效时需向短线侠更新后覆盖该文件
 7. `ztlive.json` 无需token但有频率限制，连续请求间隔建议 ≥ 10秒，否则返回 403
 8. 盘中数据请求频率建议 ≤ 1次/秒，避免被限制
-9. 已对接的现有脚本：`fetch_daily_zt.py`（使用 `fupan_date` + `fupan_yidong` API 获取历史涨停数据）、`scripts/pool_builder.py`（股票池/梯队角色，见 `references/pool/`）
+9. 现有脚本：`scripts/pool_builder.py`（股票池/梯队角色，见 `references/pool/`）；深查脚本 `references/health/scripts/{cninfo,eastmoney}_health.py`（公告三级 / 龙虎榜席位），用法见 `references/health/`
 10. IP 风控：密集调用 → 整站 403 数小时；脚本 `_throttle()` ≥10 秒，人工调用同样遵守各环节 skill 里的限流要求
 
 **免费降级渠道（第九章）**：ztlive.json 免token；getHisZtPool 需先 GET `/web/zthis/iframe` 建 session；本地 opentdx MCP（stock_top_board 涨停池/stock_auction 竞价/symbol_zjlx 资金流）可替代行情类；龙虎榜席位与公告全文用东财 datacenter/巨潮（免费、不受短线侠风控）。

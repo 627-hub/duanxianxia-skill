@@ -25,6 +25,9 @@ origin: custom (duanxianxia 子技能, 2026-09-16 拆分)
 
 脚本：`~/.claude/skills/duanxianxia/scripts/pool_builder.py`（仅依赖 requests，走免费复盘 API；`_throttle` ≥10 秒防整站 403）
 
+**解释器**：必须用 `/opt/homebrew/bin/python3`——系统 `python3` 无 requests（实测 ModuleNotFoundError）。
+`build` 约 2 分钟（交易日导航+每日复盘各 ≥10 秒限流）、`roles` 约 30 秒；跑 `roles` 前先确认 `getFupanDate(choose)` 返回今天，否则等 fupan 落库（返回早一天 = 当日未更新，需标注「待补算」）。
+
 ```bash
 python3 ~/.claude/skills/duanxianxia/scripts/pool_builder.py build            # 重建股票池（默认近5个交易日，含X天Y板非连续）
 python3 ~/.claude/skills/duanxianxia/scripts/pool_builder.py show             # 查看股票池与高频概念

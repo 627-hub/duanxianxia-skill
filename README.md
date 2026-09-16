@@ -97,6 +97,7 @@ print(fupan["indicators"])
 | **开盘啦子板块** | `POST bm.duanxianxia.com/data/getKaipanSubPlate` | `{result}` |
 | **实时推送** | `wss://duanxianxia.com/wss1` | WebSocket JSON |
 | **选股通涨停解读** | `GET flash-api.xuangubao.cn/api/surge_stock/{plates,stocks}` | `{plates: 板块+催化}`、`{stocks: 涨停原因/几天几板/概念}`（免token，独立厂商） |
+| **新浪个股资金流** | `GET vip.stock.finance.sina.com.cn/.../MoneyFlow.ssl_qsfx_zjlrqs?daima=sz000993` | 历史日序列 `{netamount 净流入, r0_net 特大单净额}`（免token，push2his 限流替代主源） |
 
 要求：完整浏览器 UA；AJAX 接口带 `Referer`/`Origin`/`X-Requested-With`。
 涨停池快照解密参数（公开常量）：`AES-256-CBC`，key=`secretkey322yes!!aaaaaaaaaaaaaaa`，iv=`fixediv_16valued`。
