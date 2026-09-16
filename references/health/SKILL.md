@@ -35,7 +35,7 @@ origin: custom (duanxianxia 子技能, 2026-09-16 拆分)
 触发：同概念 ≥2 只的梯队概念，对其**连板票**批量三项检查：
 
 1. **异常波动公告三级判定**（巨潮 hisAnnouncement + pdftotext，抓「特别提示」段）；
-2. **龙虎榜席位**（东财 datacenter，请求间隔 ≥3 秒）：买方东财席位 ≥2 家且占比 >30% = 散户接盘；净买连续负而连板 = 对倒嫌疑；
+2. **龙虎榜席位**（东财 datacenter，请求间隔 ≥3 秒）：买方东财席位 ≥2 家且占比 >30% = 散户接盘；净买连续负而连板 = 对倒嫌疑；东财断连/限流时降级用交易所官方源（深交所/上交所，见 三.1）；
 3. **资金流出**（连板但主力持续净流出 = 借情绪出货）——数据源优先级（2026-09-16 实测定稿）：
    - **默认主源：新浪个股资金流趋势**（免费、免 token、历史日序列）：
      ```python
@@ -62,6 +62,22 @@ origin: custom (duanxianxia 子技能, 2026-09-16 拆分)
 - **解释器**：必须 `/opt/homebrew/bin/python3`——系统 `python3`/`/usr/bin/python3` 无 requests（实测 ModuleNotFoundError）。
 - **巨潮**：`hisAnnouncement/query` 的 `column` **固定 `szse`**；传 `shse` 对沪市票**静默返回 0 条**（会漏报 605xxx 的风险提示公告）。`stock=代码,orgId`，orgId 取自 `/new/data/szse_stock.json`（含沪深全量 6254 条）。PDF 取 `http://static.cninfo.com.cn/<adjunctUrl>`，用 `pdftotext -layout` 后正则抓**整句**「非理性炒作/击鼓传花/过热/换手率/市盈率」——只抓「特别提示」段会漏掉关键定性句。
 - **东财龙虎榜**：`reportName=RPT_DAILYBILLBOARD_DETAILS`（**带 `NEW` 会报 `9501 NET_BUY_AMT 排序列不存在`**）；买方席位 `RPT_BILLBOARD_DAILYDETAILSBUY`、卖方席位 `RPT_BILLBOARD_DAILYDETAILSSELL`（**`...SELLS` 报表不存在**，写错返回空且不报错）。买方表同时含 BUY/SELL 双向金额，可识别同一席位对倒。当日榜 18:50 前已可查。
+- **龙虎榜降级（东财限流/断连时用，2026-09-16 实测全通）**——交易所官方零鉴权一手源，需带浏览器 UA + Referer：
+  ```python
+  # 深交所（JSON，日期必须连字符；PAGENO 翻页，每页 10 条直到空）
+  GET https://www.szse.cn/api/report/ShowReport/data?SHOWTYPE=JSON&CATALOGID=1842_xxpl&TABKEY=tab1
+       &txtStart=YYYY-MM-DD&txtEnd=YYYY-MM-DD&PAGENO=1
+  #   Referer: https://www.szse.cn/disclosure/supervision/dealinfo/index.html
+  #   → data[]: zqdm/zqjc/cjje(万元)/cjsl/plyy(上榜原因)/bz(含席位明细参数 DQRQ、ZQDM、ZBDM)
+  # 深交所席位明细（参数取自榜单 bz 字段）：
+  GET https://www.szse.cn/api/report/ShowReport/data?SHOWTYPE=JSON&CATALOGID=1842_detal
+       &TABKEY=tab1,tab2&DQRQ=YYYY-MM-DD&ZQDM=代码&ZBDM=0901
+  #   → tab1: mmlb(买1/卖1…)/zsmc(营业部)/mrje(买入,元)/mcje(卖出,元)
+  # 上交所（JSONP，返回 fileContents 文本块＝每日交易信息全文含席位段，需文本解析）：
+  GET https://query.sse.com.cn/infodisplay/showTradePublicFile.do?jsonCallBack=cb&isPagination=false&dateTx=YYYY-MM-DD
+  #   Referer: https://www.sse.com.cn/disclosure/diclosure/public/
+  ```
+  降级链：**东财 datacenter（主）→ 深交所 1842_xxpl/1842_detal（深市，JSON）+ 上交所 showTradePublicFile（沪市，文本）**；深交所数据与东财交叉核对过一致（002585 深股通买 1.695 亿）。
 - **资金流**：push2his 连续取数即断连、**已弃用**——统一用新浪 MoneyFlow（见第三节第 3 条数据源优先级）；`eastmoney_health.py` 的 `moneyflow()` 已切到新浪源。
 - 散户接盘口径：沪市「东方财富证券…拉萨…营业部」；**买方东财席位 ≥2 家且占买方总额 >30%** 才算（单家不算）。
 - 深查结论落盘后**回读校验**（roles 键与 stocks 一致、warnings 条数），并在 19:10 前完成——19:10 复盘任务依赖 `health_YYYY-MM-DD.json`。

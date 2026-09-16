@@ -560,7 +560,7 @@ GET https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFl
 6. token 文件：`~/.claude/skills/duanxianxia/.token`（本地私有，勿提交）；token 失效时需向短线侠更新后覆盖该文件
 7. `ztlive.json` 无需token但有频率限制，连续请求间隔建议 ≥ 10秒，否则返回 403
 8. 盘中数据请求频率建议 ≤ 1次/秒，避免被限制
-9. 现有脚本：`scripts/pool_builder.py`（股票池/梯队角色，见 `references/pool/`）；深查脚本 `references/health/scripts/{cninfo,eastmoney}_health.py`（公告三级 / 龙虎榜席位），用法见 `references/health/`；`scripts/trade_day.py`（交易日判断：weekday+法定节假日表，输出 YES/NO/UNKNOWN，纯标准库）
+9. 现有脚本：`scripts/pool_builder.py`（股票池/梯队角色，见 `references/pool/`）；深查脚本 `references/health/scripts/{cninfo,eastmoney}_health.py`（公告三级 / 龙虎榜席位），用法见 `references/health/`；`scripts/trade_day.py`（交易日判断：**深交所官方日历为主** + holiday-cn 兜底，输出 YES/NO/UNKNOWN，纯标准库）
 10. IP 风控：密集调用 → 整站 403 数小时；脚本 `_throttle()` ≥10 秒，人工调用同样遵守各环节 skill 里的限流要求
 
 **免费降级渠道（第九章）**：ztlive.json 免token；getHisZtPool 需先 GET `/web/zthis/iframe` 建 session；本地 opentdx MCP（stock_top_board 涨停池/stock_auction 竞价/symbol_zjlx 资金流）可替代行情类；龙虎榜席位与公告全文用东财 datacenter/巨潮（免费、不受短线侠风控）。
