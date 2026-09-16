@@ -32,6 +32,8 @@ python3 ~/.claude/skills/duanxianxia/scripts/pool_builder.py check [--date YYYYM
 python3 ~/.claude/skills/duanxianxia/scripts/pool_builder.py roles [--date YYYYMMDD]   # 梯队角色=连板/断板/分歧/观察+昨日量能，写 pool.json
 ```
 
+**不活跃剔除（2026-09-16 用户定稿）**：`roles` 运行时对池内每票检查**近 5 个交易日 K 线**——全部未触及涨停价（无涨停也无炸板尝试；涨停价：主板×1.10 / 创业板科创板×1.20 / 北交所×1.30，容差 ×0.998）→ **从池中剔除并同步清理 roles**。K 线不足 6 根（新股/停牌）保守不剔除。剔除名单会打印：`🗑️ 已剔除不活跃 N 只`。实例（9/16 实测）：新赛股份/百大集团/中水渔业/金正大 被剔除——近 5 日最高价均未触及涨停价。
+
 ## 三、状态文件（跨 opencode / Hermes 共享）
 
 `~/.cache/duanxianxia/pool.json`：
