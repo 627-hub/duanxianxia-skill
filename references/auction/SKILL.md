@@ -13,6 +13,7 @@ origin: custom (duanxianxia 子技能, 2026-09-16 拆分)
 # duanxianxia-auction 开盘竞价交易计划
 
 > 数据底座（端点全表/免费通道/token）见 `~/.claude/skills/duanxianxia/SKILL.md`。本节指标同时覆盖 **开盘竞价 9:15-9:25** 与 **尾盘竞价 14:57-15:00**。
+> 前置：交易日判断 `python3 ~/.claude/skills/duanxianxia/scripts/trade_day.py`（NO → 静默结束）；UNKNOWN 时用竞价数据二次校验（数据全空视为非交易日）。
 
 ## 一、数据源（11.1）
 

@@ -44,7 +44,7 @@ python3 ~/.claude/skills/duanxianxia/scripts/pool_builder.py roles [--date YYYYM
 | 字段 | 写入方 | 说明 |
 |---|---|---|
 | `stocks` | build | 池内股票（代码/名称/概念/X天Y板） |
-| `roles` / `roles_date` | roles | 梯队角色标注，供次日竞价读取；`roles_date` 非昨日 → 9:27 竞价前现场补跑 |
+| `roles` / `roles_date` | roles | 梯队角色标注，供次日竞价读取；`roles_date` 非昨日 → 9:26 竞价前现场补跑 |
 | `warnings` | duanxianxia-health | 负面提醒（只提醒不拉黑）：{code或概念: {level:"🔴"/"🟠", reason, date, quote}} |
 
 ## 四、判定与输出
@@ -63,7 +63,7 @@ python3 ~/.claude/skills/duanxianxia/scripts/pool_builder.py roles [--date YYYYM
 ## 六、集成（2026-09-16 拆分后的定时任务）
 
 - **18:50 盘后深查**（第一步）：`build` → `roles --date 今天`；fupan 未更新（解析 0 只）标注「待补算」。
-- **9:27 竞价计划**：先 `show`，取池内最强 5 只及其主线概念纳入竞价关注池（roles 缺失时补跑 `roles --date 昨日`）。
+- **9:26 竞价计划**：先 `show`，取池内最强 5 只及其主线概念纳入竞价关注池（roles 缺失时补跑 `roles --date 昨日`）。
 - **19:10 复盘汇总**：读取 roles 完成梯队角色表。
 
 ## 七、数据源兜底（fupan 未更新时）
