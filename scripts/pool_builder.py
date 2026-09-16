@@ -318,6 +318,40 @@ def cmd_roles(date=None):
                     r["unique_lianban"] = True
                     break
 
+    # 不活跃剔除: 连续5个交易日无涨停且无炸板(冲高回落过涨停线) → 从池中移除
+    # 判定: 近5日每日(K线)最高价均未触及涨停价(=无涨停无炸板尝试) → 不活跃
+    removed = []
+    kept_stocks = []
+    for s in st["stocks"]:
+        code = s["code"]
+        k = _tx_daily(code, 7)
+        is_active = False
+        if len(k) >= 6:
+            for i in range(len(k) - 5, len(k)):
+                h = k[i][3]
+                pc = k[i - 1][2]
+                # 涨停价: 主板10%/创业板科创板20%/北交所30%
+                if code.startswith(("30", "68")):
+                    zt = round(pc * 1.2, 2)
+                elif code.startswith(("4", "8")):
+                    zt = round(pc * 1.3, 2)
+                else:
+                    zt = round(pc * 1.1, 2)
+                if h >= zt * 0.998:  # 近5日任一日触及涨停价=涨停或炸板 → 活跃
+                    is_active = True
+                    break
+        else:
+            is_active = True  # K线不足(新股/停牌)不剔除
+        if is_active:
+            kept_stocks.append(s)
+        else:
+            removed.append(f"{code} {s['name']}")
+    st["stocks"] = kept_stocks
+    if removed:
+        print(f"🗑️ 已剔除不活跃 {len(removed)} 只(连续5交易日无涨停/炸板): {', '.join(removed)}")
+        for rn in removed:
+            st.get("roles", {}).pop(rn.split()[0], None)
+
     # 写入状态文件
     st["roles_date"] = date
     st["roles"] = roles
