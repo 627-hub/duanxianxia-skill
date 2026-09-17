@@ -530,15 +530,15 @@ GET https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFl
 |---|---|---|---|---|
 | 池维护 | `duanxianxia-pool` | 18:50 第一步 | fupan | pool.json: stocks/roles/roles_date |
 | 深查/公告 | `duanxianxia-health` | 18:50 第二步；8:30 盘前 | pool.json | pool.json: warnings + health_YYYY-MM-DD.json |
-| 竞价验证 | `duanxianxia-verify` | 19:10 第一步 | 9:26 计划md + 行情 | verify_YYYY-MM-DD.json |
-| 复盘汇总 | `duanxianxia-review` | 19:10 第二步 | fupan + pool.json + 验证 | 复盘JSON + 推送摘要 |
+| 竞价验证 | `duanxianxia-verify` | 19:20 第一步 | 9:26 计划md + 行情 | verify_YYYY-MM-DD.json |
+| 复盘汇总 | `duanxianxia-review` | 19:20 第二步 | fupan + pool.json + 验证 | 复盘JSON + 推送摘要 |
 | 竞价计划 | `duanxianxia-auction` | 9:26 | pool.json: roles/warnings | 计划md |
 
 每日数据流：
 
 ```
 18:50 pool→health（重活错峰先跑）
-  → 19:10 verify→review（一条汇总推送）
+  → 19:20 verify→review（一条汇总推送）
   → 次日 8:30 health 盘前增量（隔夜公告）
   → 9:26 auction 出计划（读 roles + warnings）
 ```
@@ -560,7 +560,8 @@ GET https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFl
 6. token 文件：`~/.claude/skills/duanxianxia/.token`（本地私有，勿提交）；token 失效时需向短线侠更新后覆盖该文件
 7. `ztlive.json` 无需token但有频率限制，连续请求间隔建议 ≥ 10秒，否则返回 403
 8. 盘中数据请求频率建议 ≤ 1次/秒，避免被限制
-9. 现有脚本：`scripts/pool_builder.py`（股票池/梯队角色，见 `references/pool/`）；深查脚本 `references/health/scripts/{cninfo,eastmoney}_health.py`（公告三级 / 龙虎榜席位），用法见 `references/health/`；`scripts/trade_day.py`（交易日判断：**深交所官方日历为主** + holiday-cn 兜底，输出 YES/NO/UNKNOWN，纯标准库）
+9. 现有脚本：`scripts/pool_builder.py`（股票池/梯队角色，见 `references/pool/`）；深查脚本 `references/health/scripts/{cninfo,eastmoney}_health.py`（公告三级 / 龙虎榜席位），用法见 `references/health/`；`scripts/trade_day.py`（交易日判断：**深交所官方日历为主** + holiday-cn 兜底，输出 YES/NO/UNKNOWN，纯标准库）；`scripts/read_pool.py`（读 pool.json 子集：brief/roles/warnings/stocks，替代 cron 中被拦截的 `python3 -c`）
 10. IP 风控：密集调用 → 整站 403 数小时；脚本 `_throttle()` ≥10 秒，人工调用同样遵守各环节 skill 里的限流要求
+11. cron 环境（Hermes 无人值守）注意事项：禁用 `python3 -c` 与 `execute_code`（会被安全拦截）；读 pool.json 用 `scripts/read_pool.py`；需要 requests 的脚本用 `/opt/homebrew/bin/python3`（系统 python3 无 requests）
 
 **免费降级渠道（第九章）**：ztlive.json 免token；getHisZtPool 需先 GET `/web/zthis/iframe` 建 session；本地 opentdx MCP（stock_top_board 涨停池/stock_auction 竞价/symbol_zjlx 资金流）可替代行情类；龙虎榜席位与公告全文用东财 datacenter/巨潮（免费、不受短线侠风控）。

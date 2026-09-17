@@ -73,8 +73,13 @@ def lhb_day(date):
 
 
 def lhb_seats(date, code):
+    """买方/卖方席位明细。
+    坑（2026-09-17 实测）：卖方表名是 RPT_BILLBOARD_DAILYDETAILSSELL，
+    写成 ...DETAILSSELLS 会静默返回空（不报错）→ 卖方席位长期缺失。
+    另：同一席位会在不同「上榜原因」下重复返回，直接按行计数会高估东财席位家数。
+    """
     out = {"buy": [], "sell": []}
-    for tag, rep in (("buy", "RPT_BILLBOARD_DAILYDETAILSBUY"), ("sell", "RPT_BILLBOARD_DAILYDETAILSSELLS")):
+    for tag, rep in (("buy", "RPT_BILLBOARD_DAILYDETAILSBUY"), ("sell", "RPT_BILLBOARD_DAILYDETAILSSELL")):
         flt = urllib.parse.quote(f'(TRADE_DATE=\'{date}\')(SECURITY_CODE="{code}")')
         url = ("https://datacenter-web.eastmoney.com/api/data/v1/get?"
                f"reportName={rep}&columns=ALL&source=WEB&client=WEB&pageNumber=1&pageSize=60&filter={flt}")
@@ -83,6 +88,23 @@ def lhb_seats(date, code):
             out[tag] = (j.get("result") or {}).get("data") or []
         except Exception as e:
             out[tag + "_error"] = f"{type(e).__name__} {e}"
+    return out
+
+
+def em_groups(rows):
+    """按「上榜原因」分组统计东财席位（去重后 count/ratio），返回 [(原因, 东财家数, 占比, 总买额)]"""
+    from collections import defaultdict
+    g = defaultdict(lambda: {"by": defaultdict(float)})
+    for x in rows:
+        k = str(x.get("EXPLANATION") or x.get("EXPLAIN") or "")
+        d = x.get("OPERATEDEPT_NAME") or ""
+        # 同一席位在同一原因下若出现多行，取较大值（避免分页/重复行重复计）
+        g[k]["by"][d] = max(g[k]["by"][d], float(x.get("BUY") or 0))
+    out = []
+    for k, v in g.items():
+        tot = sum(v["by"].values())
+        em = {d: a for d, a in v["by"].items() if "东方财富" in d}
+        out.append((k, len(em), (sum(em.values()) / tot if tot else 0.0), tot))
     return out
 
 
@@ -124,15 +146,22 @@ def main():
         b, s = seats.get("buy") or [], seats.get("sell") or []
         rec["buy_seats"] = [{"dept": x.get("OPERATEDEPT_NAME"), "buy": x.get("BUY"), "sell": x.get("SELL")} for x in b]
         rec["sell_seats"] = [{"dept": x.get("OPERATEDEPT_NAME"), "buy": x.get("BUY"), "sell": x.get("SELL")} for x in s]
-        tot = sum(float(x.get("BUY") or 0) for x in b) or 0
-        em = [x for x in b if "东方财富" in (x.get("OPERATEDEPT_NAME") or "")]
-        em_amt = sum(float(x.get("BUY") or 0) for x in em)
-        rec["em_buy_count"] = len(em)
-        rec["em_buy_ratio"] = round(em_amt / tot, 3) if tot else None
-        rec["retail_takeover"] = bool(len(em) >= 2 and tot and em_amt / tot > 0.30)
+        gs = em_groups(b)
+        if gs:
+            gs_sorted = sorted(gs, key=lambda t: (-t[1], -t[2]))
+            rec["em_buy_count"] = gs_sorted[0][1]
+            rec["em_buy_ratio"] = round(gs_sorted[0][2], 3)
+            rec["retail_takeover"] = any(c >= 2 and r > 0.30 for (_, c, r, _) in gs)
+            rec["em_groups"] = [{"reason": k[:28], "em_seats": c, "ratio": round(r, 3), "buy_total": round(t, 1)}
+                                for (k, c, r, t) in gs_sorted]
+        else:
+            rec["em_buy_count"] = 0
+            rec["em_buy_ratio"] = None
+            rec["retail_takeover"] = False
         rec["mf"] = moneyflow(code)
         result.append(rec)
-        print(f"[{code}] 上榜={rec['on_board']} 东财买方{len(em)}家 占比{rec['em_buy_ratio']} 散户接盘={rec['retail_takeover']}", flush=True)
+        print(f"[{code}] 上榜={rec['on_board']} 东财买方{rec['em_buy_count']}家 占比{rec['em_buy_ratio']} 散户接盘={rec['retail_takeover']}"
+              + (" | 分组: " + str(rec.get("em_groups")) if rec.get("em_groups") else ""), flush=True)
         for x in rec["buy_seats"][:6]:
             print("    买:", x["dept"], x["buy"], flush=True)
         for x in rec["sell_seats"][:6]:

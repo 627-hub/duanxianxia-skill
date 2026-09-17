@@ -2,7 +2,7 @@
 name: duanxianxia-review
 version: "1.0.0"
 description: |
-  盘后复盘汇总与推送（19:10）：情绪周期信号（顶点→降仓 / 冰点→建仓 / 回暖→加仓，含 check_sentiment_signal 实现）、
+  盘后复盘汇总与推送（19:20）：情绪周期信号（顶点→降仓 / 冰点→建仓 / 回暖→加仓，含 check_sentiment_signal 实现）、
   亏钱效应与板块分歧检验、题材持续性监控（宽度↑/负反馈↓/断线）、复盘报告结构（推送摘要①~⑤ + 完整JSON字段）。
   汇总上游环节：duanxianxia-health 的 warnings、duanxianxia-verify 的「竞价计划验证」，只发结论摘要 400-600 字。
   使用时机（即使未明说也应触发）：盘后复盘、情绪信号判断、题材持续性表、复盘报告/JSON 生成、用户问「今天复盘」时。

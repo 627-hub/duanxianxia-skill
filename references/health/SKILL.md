@@ -22,7 +22,7 @@ origin: custom (duanxianxia 子技能, 2026-09-16 拆分)
 - **票永不剔除**——次日盘前只读 warnings，在关注池表格旁加 🔴/🟠 标记 + 一句风险摘要；
 - 参与与仓位由用户自决，不做任何禁止性处理（不设禁止、不强制降仓）。
 - 盘后深查的逐概念明细另写 `~/.cache/duanxianxia/health_YYYY-MM-DD.json`
-  （字段：`[{概念, 公告级, 原文关键句, 龙虎榜, 资金, 结论}]`，供 19:10 复盘 JSON 的「梯队健康度」字段）。
+  （字段：`[{概念, 公告级, 原文关键句, 龙虎榜, 资金, 结论}]`，供 19:20 复盘 JSON 的「梯队健康度」字段）。
 
 ## 二、公告三级判定（两模式共用）
 
@@ -48,7 +48,7 @@ origin: custom (duanxianxia 子技能, 2026-09-16 拆分)
    - 应急单发：东财 push2 `stock/get`（同族 push2his 连续即断连，不可批量）；
    - 已失效/不可用：腾讯 `ff_`、ifzq `ffqs`（接口下线）；百度股市通（Result null）；tdx `symbol_zjlx`（schema 校验失败）。
 
-限流与时间预算：新浪 ≥1 秒；东财 datacenter ≥3 秒；巨潮 ≥1 秒；PDF 每票 1 份；单概念 ≤90 秒；**深查总时长 ≤15 分钟（19:05 前完成落盘），保证 19:10 复盘可用——取数失败一律降级标注，不追数据**。结论合并写入 warnings（与昨夜 warnings 合并，保留 `quote` 原文）。
+限流与时间预算：新浪 ≥1 秒；东财 datacenter ≥3 秒；巨潮 ≥1 秒；PDF 每票 1 份；单概念 ≤90 秒；**深查总时长 ≤15 分钟（19:05 前完成落盘），保证 19:20 复盘可用——取数失败一律降级标注，不追数据**。结论合并写入 warnings（与昨夜 warnings 合并，保留 `quote` 原文）。
 
 ### 三.1 脚本与接口实测要点（2026-09-16 固化，踩坑必读）
 
@@ -61,7 +61,8 @@ origin: custom (duanxianxia 子技能, 2026-09-16 拆分)
 
 - **解释器**：必须 `/opt/homebrew/bin/python3`——系统 `python3`/`/usr/bin/python3` 无 requests（实测 ModuleNotFoundError）。
 - **巨潮**：`hisAnnouncement/query` 的 `column` **固定 `szse`**；传 `shse` 对沪市票**静默返回 0 条**（会漏报 605xxx 的风险提示公告）。`stock=代码,orgId`，orgId 取自 `/new/data/szse_stock.json`（含沪深全量 6254 条）。PDF 取 `http://static.cninfo.com.cn/<adjunctUrl>`，用 `pdftotext -layout` 后正则抓**整句**「非理性炒作/击鼓传花/过热/换手率/市盈率」——只抓「特别提示」段会漏掉关键定性句。
-- **东财龙虎榜**：`reportName=RPT_DAILYBILLBOARD_DETAILS`（**带 `NEW` 会报 `9501 NET_BUY_AMT 排序列不存在`**）；买方席位 `RPT_BILLBOARD_DAILYDETAILSBUY`、卖方席位 `RPT_BILLBOARD_DAILYDETAILSSELL`（**`...SELLS` 报表不存在**，写错返回空且不报错）。买方表同时含 BUY/SELL 双向金额，可识别同一席位对倒。当日榜 18:50 前已可查。
+- **东财龙虎榜**：`reportName=RPT_DAILYBILLBOARD_DETAILS`（**带 `NEW` 会报 `9501 NET_BUY_AMT 排序列不存在`**）；买方席位 `RPT_BILLBOARD_DAILYDETAILSBUY`、卖方席位 `RPT_BILLBOARD_DAILYDETAILSSELL`（**`...SELLS` 报表不存在，写错返回空且不报错**——2026-09-17 修掉脚本内该错字，此前卖方席位一直静默缺失、只能靠买方表双向金额推断）。买方表同时含 BUY/SELL 双向金额，可识别同一席位对倒。当日榜 18:50 前已可查。
+- **席位计数口径（2026-09-17 固化）**：同一席位会在不同「上榜原因」下**重复返回**，按行计数会高估东财席位家数（实例 000978：原始行口径 11 家/64.6% vs 按上榜原因分组去重口径 4 家/70.1%，结论同为散户接盘）。散户接盘判定用 `eastmoney_health.py` 的 `em_groups()`（输出 `em_groups` 字段）：`retail_takeover` = 任一分组满足「东财家数≥2 且占比>30%」，报告里注明口径。
 - **龙虎榜降级（东财限流/断连时用，2026-09-16 实测全通）**——交易所官方零鉴权一手源，需带浏览器 UA + Referer：
   ```python
   # 深交所（JSON，日期必须连字符；PAGENO 翻页，每页 10 条直到空）
@@ -79,8 +80,10 @@ origin: custom (duanxianxia 子技能, 2026-09-16 拆分)
   ```
   降级链：**东财 datacenter（主）→ 深交所 1842_xxpl/1842_detal（深市，JSON）+ 上交所 showTradePublicFile（沪市，文本）**；深交所数据与东财交叉核对过一致（002585 深股通买 1.695 亿）。
 - **资金流**：push2his 连续取数即断连、**已弃用**——统一用新浪 MoneyFlow（见第三节第 3 条数据源优先级）；`eastmoney_health.py` 的 `moneyflow()` 已切到新浪源。
+- **口径不可混用（2026-09-17 实测）**：新浪 `netamount/r0_net` 与旧的东财 push2his「主力净流入」**方向可能相反**（002912 9/15：新浪 +7.02亿 vs push2his −1.31亿，同一票同一日）。跨日引用历史结论时必须标注口径（「新浪口径」/「push2his口径」），不要把两源串成一条连续叙事。
+- **公告数字须回原文核验**：写进 warnings 的 PE/PB/换手/N天M板等关键数字要来自公告原文——复用 `cninfo_health.py` 的 `query()`+`pdf_text()` 抽全文后正则核验（只抓「特别提示」段会漏句）。
 - 散户接盘口径：沪市「东方财富证券…拉萨…营业部」；**买方东财席位 ≥2 家且占买方总额 >30%** 才算（单家不算）。
-- 深查结论落盘后**回读校验**（roles 键与 stocks 一致、warnings 条数），并在 19:10 前完成——19:10 复盘任务依赖 `health_YYYY-MM-DD.json`。
+- 深查结论落盘后**回读校验**（roles 键与 stocks 一致、warnings 条数），并在 19:15 前完成——19:20 复盘任务依赖 `health_YYYY-MM-DD.json`。
 
 ## 四、盘前隔夜扫描模式（8:30）
 

@@ -41,10 +41,10 @@ print(fupan["indicators"])
 | `duanxianxia-pool` | 股票池维护 / 梯队角色（连板/断板/分歧/观察） | 18:50 深查第一步 |
 | `duanxianxia-health` | 公告 / 梯队健康度深查（只提醒不拉黑） | 18:50 深查；次日 8:30 盘前增量 |
 | `duanxianxia-auction` | 开盘竞价交易计划（9:25-9:30） | 9:26 |
-| `duanxianxia-review` | 复盘汇总与推送（情绪信号/题材持续性/报告） | 19:10 |
-| `duanxianxia-verify` | 竞价计划复盘验证（计划 vs 实际） | 19:10 |
+| `duanxianxia-review` | 复盘汇总与推送（情绪信号/题材持续性/报告） | 19:20 |
+| `duanxianxia-verify` | 竞价计划复盘验证（计划 vs 实际） | 19:20 |
 
-每日数据流：`18:50 pool→health（重活错峰先跑）→ 19:10 verify→review（一条汇总推送）→ 次日 8:30 health 盘前增量 → 9:26 auction 出计划`。
+每日数据流：`18:50 pool→health（重活错峰先跑）→ 19:20 verify→review（一条汇总推送）→ 次日 8:30 health 盘前增量 → 9:26 auction 出计划`。
 
 中间产物（跨 opencode / Hermes 共享）：`~/.cache/duanxianxia/pool.json`（stocks/roles/roles_date/warnings）、`health_YYYY-MM-DD.json`、`verify_YYYY-MM-DD.json`、`复盘_YYYY-MM-DD.json`。
 

@@ -64,7 +64,7 @@ python3 ~/.claude/skills/duanxianxia/scripts/pool_builder.py roles [--date YYYYM
 
 - **18:50 盘后深查**（第一步）：`build` → `roles --date 今天`；fupan 未更新（解析 0 只）标注「待补算」。
 - **9:26 竞价计划**：先 `show`，取池内最强 5 只及其主线概念纳入竞价关注池（roles 缺失时补跑 `roles --date 昨日`）。
-- **19:10 复盘汇总**：读取 roles 完成梯队角色表。
+- **19:20 复盘汇总**：读取 roles 完成梯队角色表。
 
 ## 七、数据源兜底（fupan 未更新时）
 

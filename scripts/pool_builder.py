@@ -144,6 +144,12 @@ def build(days=5):
         "updated": ds[0], "window": ds, "stocks": stocks,
         "concepts": dict(concept_cnt.most_common()),
     }
+    # 保留既有 health 资产（warnings/roles），避免 build 覆盖丢失（2026-09-16 修复）
+    old = load_state()
+    if isinstance(old, dict):
+        for k in ("warnings", "roles", "roles_date"):
+            if k in old:
+                state[k] = old[k]
     os.makedirs(STATE_DIR, exist_ok=True)
     with open(STATE, "w") as f:
         json.dump(state, f, ensure_ascii=False, indent=1)
